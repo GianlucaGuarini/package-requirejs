@@ -1,0 +1,46 @@
+#!/usr/bin/env node
+
+'use strict';
+var fs = require('fs'),
+	path = require('path'),
+	paths = {},
+	shim = {},
+	outputFile = process.argv[2] || 'requirejs-config.js',
+	baseUrl = process.argv[3] || '',
+	dependeciesKey = process.argv[4] || 'dependencies',
+	requirejsTpl = 'requirejs.config({shim: @shim,paths: @paths });',
+	packageJSON = JSON.parse(fs.readFileSync('package.json', 'utf8')),
+	getRelativePath = function(absolutePath) {
+		return baseUrl + path.relative(__dirname, absolutePath).replace('.js', '')
+	},
+	getFileName = function(absolutePath) {
+		var pathSplit = absolutePath.split('/');
+		return pathSplit[pathSplit.length - 1].replace('.js', '');
+	},
+	findNestedDep = function(subModule) {
+		var moduleId = getFileName(subModule.id);
+
+		if (subModule.children.length) {
+			shim[moduleId] = [];
+			subModule.children.forEach(findNestedDep);
+		}
+		if (subModule.parent.id !== '.') {
+			shim[getFileName(subModule.parent.id)].push(moduleId);
+		}
+		paths[moduleId] = getRelativePath(subModule.id);
+	};
+
+if (!packageJSON[dependeciesKey]) {
+	console.log('\x1B[31m It looks like the key "' + dependeciesKey + '" is missing in your package.json \x1B[39m');
+	return;
+}
+
+Object.keys(packageJSON[dependeciesKey]).forEach(require);
+
+module.children.forEach(findNestedDep);
+
+fs.writeFile(outputFile,
+	requirejsTpl.replace('@paths', JSON.stringify(paths)).replace('@shim', JSON.stringify(shim))
+);
+
+console.log('\x1B[32m The requirejs configuration file has been created: ' + outputFile + '\x1B[39m');
