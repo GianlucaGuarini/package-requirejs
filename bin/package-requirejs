@@ -1,33 +1,61 @@
 #!/usr/bin/env node
 
 'use strict';
-var fs = require('fs'),
+
+var
+// Node internal libs
+	fs = require('fs'),
 	path = require('path'),
+	// Vars where I will cache the dependencies
 	paths = {},
 	shim = {},
+	// read the command line inputs or just use the default values
+	// the path and the name of the file to output the requirejs configuration
 	outputFile = process.argv[2] || 'requirejs-config.js',
+	// url to prepend to each module path
 	baseUrl = process.argv[3] || '',
+	// normally you should loop the children of the "dependencies" attribute into the package.json file
+	// but you can use also another property to store them
 	dependeciesKey = process.argv[4] || 'dependencies',
-	requirejsTpl = 'requirejs.config({shim: @shim,paths: @paths });',
+	// the requirejs config template
+	requirejsTpl = 'requirejs.config({\npaths: @paths,\nshim: @shim\n});',
+	// read the package json in the current folder
 	packageJSON = JSON.parse(fs.readFileSync('package.json', 'utf8')),
+	/**
+	 * Return the relative path of the javascript module installed
+	 * @param  { String } absolutePath - absolute system path to the module
+	 * @return { String }
+	 */
 	getRelativePath = function(absolutePath) {
 		return baseUrl + path.relative(process.cwd(), absolutePath).replace('.js', '')
 	},
+	/**
+	 * Get the javascript file id by its name without .js
+	 * @param  { String } absolutePath - absolute system path to the module
+	 * @return { String }
+	 */
 	getFileName = function(absolutePath) {
 		var pathSplit = absolutePath.split('/');
 		return pathSplit[pathSplit.length - 1].replace('.js', '');
 	},
+	/**
+	 * Recursive function to get all the submodules nested dependencies
+	 * @param  { Object } subModule - module object
+	 */
 	findNestedDep = function(subModule) {
 		var moduleId = getFileName(subModule.id);
 
+		// check the module dependencies
 		if (subModule.children.length) {
 			shim[moduleId] = [];
 			subModule.children.forEach(findNestedDep);
 		}
 
+		// include the subDependencies inside the shim
 		if (subModule.parent.id !== '.') {
 			shim[getFileName(subModule.parent.id)].push(moduleId);
 		}
+
 		paths[moduleId] = getRelativePath(subModule.id);
 	};
 
@@ -36,14 +64,18 @@ if (!packageJSON[dependeciesKey]) {
 	return;
 }
 
+// loop all the package.json dependencies
 Object.keys(packageJSON[dependeciesKey]).forEach(function(dep) {
-	require(path.resolve(path.dirname(dep)))
+	// load the dependency
+	require(process.cwd() + '/node_modules/' + dep);
 });
 
+// loop all the modules just loaded before
 module.children.forEach(findNestedDep);
 
+// print the output
 fs.writeFile(outputFile,
-	requirejsTpl.replace('@paths', JSON.stringify(paths)).replace('@shim', JSON.stringify(shim))
+	requirejsTpl.replace('@paths', JSON.stringify(paths, null, 2)).replace('@shim', JSON.stringify(shim, null, 2))
 );
 
 console.log('\x1B[32m The requirejs configuration file has been created: ' + outputFile + '\x1B[39m');

@@ -1,13 +1,13 @@
 {
   "name": "package-requirejs",
-  "version": "0.0.3",
+  "version": "0.0.4",
   "description": "Generate a valid requirejs-config.js file automatically detecting all the package.json dependencies",
   "main": "package-requirejs",
   "bin": {
     "package-requirejs": "bin/package-requirejs"
   },
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "./bin/package-requirejs"
   },
   "repository": {
     "type": "git",
