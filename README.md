@@ -52,7 +52,11 @@ requirejs.config({
 
 #### Options
 
-You can pass your custom options to `package-requirejs` in the followinf order
+You can pass your custom options to `package-requirejs` in the following order
+
+ 1. Output of the script (requirejs-config.js default)
+ 2. Path to prepend to all the requirejs paths modules ('' default)
+ 3. Property in your package.json where the script can loop the dependencies installed ('dependencies' default)
 
 ```bash
 $ package-requirejs path/to/the/output/requirejs-config.js ../path/to/prepend/to/the/modules
