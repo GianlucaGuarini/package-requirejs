@@ -11,7 +11,7 @@ var fs = require('fs'),
 	requirejsTpl = 'requirejs.config({shim: @shim,paths: @paths });',
 	packageJSON = JSON.parse(fs.readFileSync('package.json', 'utf8')),
 	getRelativePath = function(absolutePath) {
-		return baseUrl + path.relative(__dirname, absolutePath).replace('.js', '')
+		return baseUrl + path.relative(process.cwd(), absolutePath).replace('.js', '')
 	},
 	getFileName = function(absolutePath) {
 		var pathSplit = absolutePath.split('/');
@@ -24,6 +24,7 @@ var fs = require('fs'),
 			shim[moduleId] = [];
 			subModule.children.forEach(findNestedDep);
 		}
+
 		if (subModule.parent.id !== '.') {
 			shim[getFileName(subModule.parent.id)].push(moduleId);
 		}
@@ -35,7 +36,9 @@ if (!packageJSON[dependeciesKey]) {
 	return;
 }
 
-Object.keys(packageJSON[dependeciesKey]).forEach(require);
+Object.keys(packageJSON[dependeciesKey]).forEach(function(dep) {
+	require(path.resolve(path.dirname(dep)))
+});
 
 module.children.forEach(findNestedDep);
 
