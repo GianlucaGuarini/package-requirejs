@@ -1,6 +1,6 @@
 {
   "name": "package-requirejs",
-  "version": "0.0.4",
+  "version": "0.0.5",
   "description": "Generate a valid requirejs-config.js file automatically detecting all the package.json dependencies",
   "main": "package-requirejs",
   "bin": {

@@ -6,57 +6,119 @@ var
 // Node internal libs
 	fs = require('fs'),
 	path = require('path'),
-	// Vars where I will cache the dependencies
+	// variable where I will cache all the dependencies
 	paths = {},
 	shim = {},
 	// read the command line inputs or just use the default values
 	// the path and the name of the file to output the requirejs configuration
 	outputFile = process.argv[2] || 'requirejs-config.js',
-	// url to prepend to each module path
+	// url to prepend to each dependency path
 	baseUrl = process.argv[3] || '',
+	// shuld it find also the nested dependencies?
+	nestedDependencies = process.argv[4] || true,
 	// normally you should loop the children of the "dependencies" attribute into the package.json file
 	// but you can use also another property to store them
-	dependeciesKey = process.argv[4] || 'dependencies',
+	dependeciesKey = process.argv[5] || 'dependencies',
+	regExpDependencyExtensions = /(.js|.js.js|.git)$/,
 	// the requirejs config template
 	requirejsTpl = 'requirejs.config({\npaths: @paths,\nshim: @shim\n});',
 	// read the package json in the current folder
 	packageJSON = JSON.parse(fs.readFileSync('package.json', 'utf8')),
 	/**
 	 * Return the relative path of the javascript module installed
-	 * @param  { String } absolutePath - absolute system path to the module
+	 * @param  { String } absoluteDependencyPath - absolute system path to the module
 	 * @return { String }
 	 */
-	getRelativePath = function(absolutePath) {
-		return baseUrl + path.relative(process.cwd(), absolutePath).replace('.js', '')
+	getRelativePath = function(absoluteDependencyPath) {
+		return baseUrl + path.relative(process.cwd(), absoluteDependencyPath).replace(regExpDependencyExtensions, '')
 	},
 	/**
-	 * Get the javascript file id by its name without .js
-	 * @param  { String } absolutePath - absolute system path to the module
+	 * Loop an entire folder trying to find a sepcific javascript file
+	 * @param  { String } dir - directory path
+	 * @param  { String } fileName - it's the name of the javascript without the .js extension
+	 * @return { String | Undefined } if the file gets found it returns its path
+	 */
+	find = function(dir, fileName) {
+		// read the directory files
+		var files = fs.readdirSync(dir),
+			ret;
+
+		// loop all the files
+		for (var i = files.length - 1; i > 0; i--) {
+			var file = files[i],
+				tmpFilePath = dir + '/' + file,
+				stat = fs.statSync(tmpFilePath);
+
+			if (stat && stat.isDirectory()) {
+				ret = find(tmpFilePath, fileName);
+			} else {
+				if (getDependencyId(tmpFilePath) === fileName) {
+					ret = tmpFilePath;
+					break;
+				}
+			}
+		};
+
+		return ret;
+
+	},
+	/**
+	 * Get the dependency id by any path ( git or local system )
+	 * @param  { String } absoluteDependencyPath - path to the module
 	 * @return { String }
 	 */
-	getFileName = function(absolutePath) {
-		var pathSplit = absolutePath.split('/');
-		return pathSplit[pathSplit.length - 1].replace('.js', '');
+	getDependencyId = function(absoluteDependencyPath) {
+		var pathSplit = absoluteDependencyPath.split('/');
+		return pathSplit[pathSplit.length - 1].replace(regExpDependencyExtensions, '');
 	},
 	/**
-	 * Recursive function to get all the submodules nested dependencies
-	 * @param  { Object } subModule - module object
+	 * Some libraries ( ex: the jquery.myPlugin ) could have their dependencies in the file name
+	 * Create a shim also for this modules
+	 * @param  { String } dependencyName - dependency id
 	 */
-	findNestedDep = function(subModule) {
-		var moduleId = getFileName(subModule.id);
+	setDependenciesByFileName = function(dependencyName) {
+		// split the dependency name in fragment divided by (. or - or _)
+		var dependencyNameFragments = dependencyName.split(/[.|-|_]/g);
 
-		// check the module dependencies
-		if (subModule.children.length) {
-			shim[moduleId] = [];
-			subModule.children.forEach(findNestedDep);
+		// not enough fragments
+		if (dependencyNameFragments.length === 1) return;
+
+		// loop all the fragments
+		dependencyNameFragments.forEach(function(fragment) {
+			// loop again all the dependencies
+			Object.keys(paths).forEach(function(tmpDependencyName) {
+				// a dependency cannot be a shim of itself
+				if (tmpDependencyName === dependencyName) return;
+				// check if the fragment could be related to another dependency
+				if (new RegExp(fragment, 'i').test(tmpDependencyName)) {
+					if (!shim[dependencyName])
+						shim[dependencyName] = [];
+					shim[dependencyName].push(tmpDependencyName);
+				}
+			});
+		});
+	},
+	/**
+	 * Recursive function to get all the nested dependencies
+	 * @param  { Object } dependency - node module object
+	 */
+	findNestedDepenencies = function(dependency) {
+		var dependencyName = getDependencyId(dependency.filename);
+
+		if (nestedDependencies) {
+			// check the module dependencies
+			if (dependency.children.length) {
+				shim[dependencyName] = [];
+				dependency.children.forEach(findNestedDepenencies);
+			}
+
+			// include the subDependencies inside the shim
+			if (dependency.parent.id !== '.') {
+				shim[getDependencyId(dependency.parent.filename)].push(dependencyName);
+			}
 		}
 
-		// include the subDependencies inside the shim
-		if (subModule.parent.id !== '.') {
-			shim[getFileName(subModule.parent.id)].push(moduleId);
-		}
-
-		paths[moduleId] = getRelativePath(subModule.id);
+		paths[dependencyName] = getRelativePath(dependency.filename);
 	};
 
 if (!packageJSON[dependeciesKey]) {
@@ -65,13 +127,26 @@ if (!packageJSON[dependeciesKey]) {
 }
 
 // loop all the package.json dependencies
-Object.keys(packageJSON[dependeciesKey]).forEach(function(dep) {
-	// load the dependency
-	require(process.cwd() + '/node_modules/' + dep);
+Object.keys(packageJSON[dependeciesKey]).forEach(function(dependency) {
+	var dependencyPath = process.cwd() + '/node_modules/' + dependency;
+
+	// try loading the dependency as nodejs module
+	try {
+		require(dependencyPath);
+	} catch (error) {
+		// this module cannot be loaded in nodejs so we use a fallback
+		var fileName = getDependencyId(packageJSON[dependeciesKey][dependency]),
+			pathToTheFile = find(dependencyPath, fileName);
+		if (pathToTheFile)
+			paths[fileName] = getRelativePath(pathToTheFile);
+	}
 });
 
 // loop all the modules just loaded before
-module.children.forEach(findNestedDep);
+module.children.forEach(findNestedDepenencies);
+
+// loop again all the dependencies to find dependencies in their file name
+Object.keys(paths).forEach(setDependenciesByFileName);
 
 // print the output
 fs.writeFile(outputFile,
