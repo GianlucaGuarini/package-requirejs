@@ -6,6 +6,9 @@ var
 // Node internal libs
 	fs = require('fs'),
 	path = require('path'),
+	// scripts that cannot be loaded by nodejs
+	// just frontend script like jquery plugins...
+	fallbackDependencies = {},
 	// variable where I will cache all the dependencies
 	paths = {},
 	shim = {},
@@ -15,7 +18,7 @@ var
 	// url to prepend to each dependency path
 	baseUrl = process.argv[3] || '',
 	// shuld it find also the nested dependencies?
-	nestedDependencies = process.argv[4] || true,
+	nestedDependencies = process.argv[4] === 'false' ? false : true,
 	// normally you should loop the children of the "dependencies" attribute into the package.json file
 	// but you can use also another property to store them
 	dependeciesKey = process.argv[5] || 'dependencies',
@@ -30,7 +33,7 @@ var
 	 * @return { String }
 	 */
 	getRelativePath = function(absoluteDependencyPath) {
-		return baseUrl + path.relative(process.cwd(), absoluteDependencyPath).replace(regExpDependencyExtensions, '')
+		return baseUrl + path.relative(process.cwd(), absoluteDependencyPath).replace(regExpDependencyExtensions, '');
 	},
 	/**
 	 * Loop an entire folder trying to find a sepcific javascript file
@@ -57,7 +60,7 @@ var
 					break;
 				}
 			}
-		};
+		}
 
 		return ret;
 
@@ -68,8 +71,13 @@ var
 	 * @return { String }
 	 */
 	getDependencyId = function(absoluteDependencyPath) {
-		var pathSplit = absoluteDependencyPath.split('/');
-		return pathSplit[pathSplit.length - 1].replace(regExpDependencyExtensions, '');
+		var pathSplit = absoluteDependencyPath.split('/'),
+			detectedId = pathSplit[pathSplit.length - 1].replace(regExpDependencyExtensions, '');
+
+		if (detectedId === 'index') {
+			detectedId = pathSplit[pathSplit.length - 2];
+		}
+		return detectedId;
 	},
 	/**
 	 * Some libraries ( ex: the jquery.myPlugin ) could have their dependencies in the file name
@@ -80,20 +88,29 @@ var
 		// split the dependency name in fragment divided by (. or - or _)
 		var dependencyNameFragments = dependencyName.split(/[.|-|_]/g);
 
+
+
 		// not enough fragments
 		if (dependencyNameFragments.length === 1) return;
+
+
 
 		// loop all the fragments
 		dependencyNameFragments.forEach(function(fragment) {
 			// loop again all the dependencies
-			Object.keys(paths).forEach(function(tmpDependencyName) {
+			Object.keys(paths).concat(Object.keys(fallbackDependencies)).forEach(function(tmpDependencyName) {
+
 				// a dependency cannot be a shim of itself
 				if (tmpDependencyName === dependencyName) return;
+
 				// check if the fragment could be related to another dependency
 				if (new RegExp(fragment, 'i').test(tmpDependencyName)) {
+
 					if (!shim[dependencyName])
 						shim[dependencyName] = [];
-					shim[dependencyName].push(tmpDependencyName);
+
+					if (!~shim[dependencyName].indexOf(tmpDependencyName))
+						shim[dependencyName].push(tmpDependencyName);
 				}
 			});
 		});
@@ -137,8 +154,9 @@ Object.keys(packageJSON[dependeciesKey]).forEach(function(dependency) {
 		// this module cannot be loaded in nodejs so we use a fallback
 		var fileName = getDependencyId(packageJSON[dependeciesKey][dependency]),
 			pathToTheFile = find(dependencyPath, fileName);
-		if (pathToTheFile)
-			paths[fileName] = getRelativePath(pathToTheFile);
+		if (pathToTheFile) {
+			paths[fileName] = fallbackDependencies[fileName] = getRelativePath(pathToTheFile);
+		}
 	}
 });
 
@@ -146,7 +164,7 @@ Object.keys(packageJSON[dependeciesKey]).forEach(function(dependency) {
 module.children.forEach(findNestedDepenencies);
 
 // loop again all the dependencies to find dependencies in their file name
-Object.keys(paths).forEach(setDependenciesByFileName);
+Object.keys(fallbackDependencies).forEach(setDependenciesByFileName);
 
 // print the output
 fs.writeFile(outputFile,
